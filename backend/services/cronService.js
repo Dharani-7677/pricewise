@@ -1,6 +1,6 @@
 const cron = require('node-cron');
 const supabase = require('../models/supabase');
-const { scrapeProduct } = require('./scraper');
+const { scrapePrice } = require('./scraper');
 const { sendPriceDropEmail } = require('./emailService');
 
 /**
@@ -18,7 +18,7 @@ async function startPriceCheckJob() {
 
             for (const product of products) {
                 // 2. Scrape new price
-                const scraped = await scrapeProduct(product.url);
+                const scraped = await scrapePrice(product.url);
                 if (!scraped || !scraped.price) continue;
 
                 const newPrice = parseFloat(scraped.price);

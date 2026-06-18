@@ -144,7 +144,19 @@ export default function DashboardPage() {
       const data = err.response?.data;
       if (data?.needs_manual_entry) {
         setNeedsManual(true);
-        setErrorMsg("Auto-detect failed. Please fill in the details manually below.");
+        
+        let customMsg = "Auto-detect failed. Please fill in the details manually below.";
+        if (formUrl.includes("meesho.com")) {
+          setFormPlatform("meesho");
+          customMsg = "Meesho auto-detect not supported yet. Please fill details manually.";
+        } else if (formUrl.includes("flipkart.com")) {
+          setFormPlatform("flipkart");
+          customMsg = "Flipkart auto-detect failed. Please fill details manually.";
+        } else if (formUrl.includes("amazon.in") || formUrl.includes("amazon.com")) {
+          setFormPlatform("amazon");
+        }
+        
+        setErrorMsg(customMsg);
         return;
       }
       alert(data?.error || err.message || "Failed to add product.");

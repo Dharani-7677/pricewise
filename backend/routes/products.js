@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../models/supabase');
-const { scrapeProduct } = require('../services/scraper');
+const { scrapePrice } = require('../services/scraper');
 
 // 1. GET ALL PRODUCTS
 router.get('/', async (req, res) => {
@@ -51,7 +51,7 @@ router.post('/', async (req, res) => {
 
         if (!productName || !productPrice) {
             try {
-                const scrapedData = await scrapeProduct(url);
+                const scrapedData = await scrapePrice(url);
                 if (scrapedData && scrapedData.name) {
                     productName = productName || scrapedData.name;
                     productPrice = productPrice || parseFloat(scrapedData.price) || 0;
