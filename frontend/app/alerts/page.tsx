@@ -1,300 +1,252 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
-import Link from "next/link";
-import { getProducts, getAlerts, createAlert, deleteAlert, Product, Alert } from "@/lib/api";
+import { useState, useEffect } from "react";
+import { getProducts, getAlerts, createAlert, deleteAlert } from "@/lib/api";
+import type { Product, Alert } from "@/lib/api";
+import ProtectedRoute from "@/components/ProtectedRoute";
 
-function getPlatformEmoji(p: string) {
-  const plat = (p || "").toLowerCase();
-  if (plat === "amazon") return "🟠";
-  if (plat === "flipkart") return "🔵";
-  if (plat === "meesho") return "🩷";
-  return "🛍️";
-}
-
-function AlertsContent() {
-  const searchParams = useSearchParams();
-  const preselectedProductId = searchParams.get("product") || "";
-
-  const [products, setProducts] = useState<Product[]>([]);
+export default function AlertsPage() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState("");
+  const [error, setError] = useState("");
   const [showModal, setShowModal] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState("");
+  const [userEmail, setUserEmail] = useState("");
+  const [targetPrice, setTargetPrice] = useState("");
+  const [creating, setCreating] = useState(false);
 
-  const [formProductId, setFormProductId] = useState(preselectedProductId);
-  const [formEmail, setFormEmail] = useState("");
-  const [formTargetPrice, setFormTargetPrice] = useState("");
+  useEffect(function () {
+    loadData();
+  }, []);
 
   async function loadData() {
-    setLoading(true);
-    setErrorMsg("");
     try {
-      const [productsData, alertsData] = await Promise.all([
-        getProducts(),
+      setLoading(true);
+      const [alertsData, productsData] = await Promise.all([
         getAlerts(),
+        getProducts(),
       ]);
-      setProducts(productsData);
       setAlerts(alertsData);
+      setProducts(productsData);
     } catch (err) {
+      setError("Failed to load alerts");
       console.error(err);
-      setErrorMsg("Could not load alerts. Is the backend running on port 5000?");
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  useEffect(() => {
-    if (preselectedProductId) {
-      setFormProductId(preselectedProductId);
-      setShowModal(true);
+  async function handleCreate() {
+    if (!selectedProduct || !userEmail || !targetPrice) {
+      alert("Please fill in all fields");
+      return;
     }
-  }, [preselectedProductId]);
-
-  async function handleCreate(e: React.FormEvent) {
-    e.preventDefault();
-    if (!formProductId || !formEmail || !formTargetPrice) return;
-
-    setSubmitting(true);
     try {
-      const newAlert = await createAlert(formProductId, formEmail, parseFloat(formTargetPrice));
-      setAlerts([newAlert, ...alerts]);
+      setCreating(true);
+      await createAlert({
+        product_id: String(selectedProduct),
+        user_email: String(userEmail),
+        target_price: parseFloat(targetPrice),
+      });
       setShowModal(false);
-      setFormEmail("");
-      setFormTargetPrice("");
-      setFormProductId("");
+      setSelectedProduct("");
+      setUserEmail("");
+      setTargetPrice("");
+      await loadData();
     } catch (err) {
       console.error(err);
-      alert("Failed to create alert.");
+      alert("Failed to create alert");
     } finally {
-      setSubmitting(false);
+      setCreating(false);
     }
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("Are you sure you want to remove this alert?")) return;
+    if (!confirm("Delete this alert?")) return;
     try {
       await deleteAlert(id);
-      setAlerts(alerts.filter(function (a) { return a.id !== id; }));
+      await loadData();
     } catch (err) {
       console.error(err);
-      alert("Failed to delete alert.");
+      alert("Failed to delete alert");
     }
   }
 
-  function findProduct(productId: string): Product | undefined {
-    return products.find(function (p) { return p.id === productId; });
+  if (loading) {
+    return (
+      <ProtectedRoute>
+        <div className="min-h-screen bg-[#0f172a] flex items-center justify-center">
+          <div className="text-[#94a3b8]">Loading alerts...</div>
+        </div>
+      </ProtectedRoute>
+    );
   }
 
   return (
-    <div className="page-container p-6 lg:p-10">
+    <ProtectedRoute>
+      <div className="min-h-screen bg-[#0f172a] text-[#f1f5f9] p-6">
+        <div className="max-w-6xl mx-auto">
 
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-[#f1f5f9]">Price Alerts</h1>
-          <p className="text-[#94a3b8] mt-1">
-            {alerts.length} active alert{alerts.length !== 1 ? "s" : ""}
-          </p>
-        </div>
-        <button
-          className="px-6 py-2.5 bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-lg transition-all font-bold disabled:opacity-50"
-          onClick={function () { setShowModal(true); }}
-          disabled={products.length === 0}
-        >
-          + Create Alert
-        </button>
-      </div>
+          {/* Header */}
+          <div className="flex items-center justify-between mb-8">
+            <div>
+              <h1 className="text-3xl font-bold text-[#f1f5f9]">Price Alerts</h1>
+              <p className="text-[#94a3b8] mt-1">{alerts.length} active alerts</p>
+            </div>
+            <button
+              onClick={() => setShowModal(true)}
+              className="px-6 py-3 bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-lg font-semibold transition-colors"
+            >
+              + Create Alert
+            </button>
+          </div>
 
-      {loading && (
-        <div className="bg-[#1e293b] border border-[#334155] rounded-xl text-center py-20">
-          <p className="text-[#94a3b8] animate-pulse">Loading alerts...</p>
-        </div>
-      )}
+          {error && (
+            <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg mb-6">
+              {error}
+            </div>
+          )}
 
-      {!loading && errorMsg && (
-        <div className="bg-[#1e293b] border border-red-500/30 rounded-xl text-center py-20">
-          <div className="text-4xl mb-3">⚠️</div>
-          <p className="text-red-400 font-medium">{errorMsg}</p>
-        </div>
-      )}
-
-      {!loading && !errorMsg && products.length === 0 && (
-        <div className="bg-[#1e293b] border border-[#334155] rounded-xl text-center py-20 border-dashed border-2">
-          <div className="text-4xl mb-3">📦</div>
-          <p className="text-[#94a3b8] mb-4">You need to add a product before creating an alert.</p>
-          <Link href="/dashboard" className="px-6 py-2 bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-lg transition-all font-bold">
-            Go to Dashboard
-          </Link>
-        </div>
-      )}
-
-      {!loading && !errorMsg && products.length > 0 && alerts.length === 0 && (
-        <div className="bg-[#1e293b] border border-[#334155] rounded-xl text-center py-20">
-          <div className="text-6xl mb-4">🔔</div>
-          <h3 className="text-[#f1f5f9] font-bold text-xl mb-2">No alerts yet</h3>
-          <p className="text-[#94a3b8] mb-6 max-w-xs mx-auto">Set a target price and we'll email you when it drops</p>
-          <button onClick={function () { setShowModal(true); }} className="px-6 py-2 bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-lg transition-all font-bold">
-            + Create Alert
-          </button>
-        </div>
-      )}
-
-      {!loading && alerts.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {alerts.map(function (alertItem) {
-            const linkedProduct = alertItem.products || findProduct(alertItem.product_id);
-            const currentPrice = linkedProduct ? linkedProduct.current_price : 0;
-            const reached = currentPrice > 0 && currentPrice <= alertItem.target_price;
-
-            return (
-              <div key={alertItem.id} className="bg-[#1e293b] border border-[#334155] rounded-xl p-6 flex flex-col gap-4 hover:border-[#6366f1]/50 transition-all">
-
-                <div className="flex items-start justify-between gap-4">
-                  <span className="text-sm font-bold text-[#f1f5f9] truncate flex-1 leading-tight">
-                    {linkedProduct ? linkedProduct.name : "Unknown product"}
-                  </span>
-                  <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-wider border ${alertItem.is_triggered || reached ? "bg-green-500/10 text-green-400 border-green-500/20" : "bg-amber-500/10 text-amber-400 border-amber-500/20"}`}>
-                    {alertItem.is_triggered || reached ? "✓ Triggered" : "⏳ Watching"}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-6 bg-[#0f172a]/50 p-4 rounded-lg border border-[#334155]/50">
-                  <div>
-                    <div className="text-[10px] text-[#94a3b8] uppercase font-bold tracking-widest mb-1">Target Price</div>
-                    <div className="text-xl font-black text-[#6366f1]">
-                      {"₹" + alertItem.target_price.toLocaleString("en-IN")}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] text-[#94a3b8] uppercase font-bold tracking-widest mb-1">Current Price</div>
-                    <div className="text-xl font-black text-[#f1f5f9]">
-                      {currentPrice > 0 ? "₹" + currentPrice.toLocaleString("en-IN") : "—"}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 text-xs text-[#94a3b8] font-medium">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
-                  {alertItem.user_email}
-                </div>
-
-                <div className="flex gap-2 mt-2">
-                  {linkedProduct && (
-                    <Link href={"/history/" + (linkedProduct.id || alertItem.product_id)} className="flex-1 text-center py-2 bg-[#334155] hover:bg-[#475569] text-white rounded-lg text-xs transition-all font-bold">
-                      📊 View History
-                    </Link>
-                  )}
-                  <button
-                    onClick={function () { handleDelete(alertItem.id); }}
-                    className="px-4 py-2 text-red-400 hover:bg-red-500/10 border border-red-500/20 rounded-lg text-xs transition-all font-bold"
-                  >
-                    🗑️ Remove
-                  </button>
-                </div>
-
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {showModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-[#1e293b] border border-[#334155] rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
-            <div className="p-6 border-b border-[#334155] flex justify-between items-center bg-[#0f172a]/50">
-              <h2 className="text-xl font-bold text-white">Create Price Alert</h2>
+          {/* Alerts Grid */}
+          {alerts.length === 0 ? (
+            <div className="bg-[#1e293b] rounded-xl p-12 text-center border border-[#334155]">
+              <div className="text-5xl mb-4">🔔</div>
+              <h3 className="text-xl font-semibold text-[#f1f5f9] mb-2">No alerts yet</h3>
+              <p className="text-[#94a3b8] mb-6">Create an alert to get notified when prices drop!</p>
               <button
-                onClick={function () { setShowModal(false); }}
-                className="text-[#94a3b8] hover:text-white"
+                onClick={() => setShowModal(true)}
+                className="px-6 py-3 bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-lg font-semibold transition-colors"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                + Create Alert
               </button>
             </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {alerts.map(function (alert) {
+                return (
+                  <div
+                    key={alert.id}
+                    className="bg-[#1e293b] rounded-xl p-6 border border-[#334155] hover:border-[#6366f1]/50 transition-all"
+                  >
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex-1">
+                        <h3 className="font-semibold text-[#f1f5f9] text-sm leading-tight line-clamp-2">
+                          {alert.products?.name || "Product"}
+                        </h3>
+                        <p className="text-[#94a3b8] text-xs mt-1">{alert.user_email}</p>
+                      </div>
+                      <span
+                        className={`ml-2 px-2 py-1 rounded-full text-xs font-medium ${
+                          alert.is_triggered
+                            ? "bg-green-500/20 text-green-400"
+                            : "bg-[#6366f1]/20 text-[#6366f1]"
+                        }`}
+                      >
+                        {alert.is_triggered ? "Triggered ✓" : "Watching"}
+                      </span>
+                    </div>
 
-            <form onSubmit={handleCreate} className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-[#94a3b8] uppercase mb-1">Select Product</label>
-                <select
-                  className="w-full bg-[#0f172a] border border-[#334155] rounded-lg px-4 py-2.5 text-[#f1f5f9] focus:outline-none focus:border-[#6366f1]"
-                  value={formProductId}
-                  onChange={function (e) { setFormProductId(e.target.value); }}
-                  required
-                >
-                  <option value="">-- Choose a product --</option>
-                  {products.map(function (p) {
-                    return (
-                      <option key={p.id} value={p.id}>
-                        {getPlatformEmoji(p.platform) + " " + p.name + " (₹" + p.current_price.toLocaleString("en-IN") + ")"}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
+                    <div className="space-y-2 mb-4">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-[#94a3b8]">Target Price</span>
+                        <span className="text-[#6366f1] font-bold">₹{alert.target_price.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-[#94a3b8]">Current Price</span>
+                        <span className="text-[#f1f5f9]">₹{alert.products?.current_price?.toLocaleString()}</span>
+                      </div>
+                    </div>
 
-              <div>
-                <label className="block text-xs font-bold text-[#94a3b8] uppercase mb-1">Your Email</label>
-                <input
-                  className="w-full bg-[#0f172a] border border-[#334155] rounded-lg px-4 py-2.5 text-[#f1f5f9] focus:outline-none focus:border-[#6366f1]"
-                  type="email"
-                  placeholder="you@example.com"
-                  value={formEmail}
-                  onChange={function (e) { setFormEmail(e.target.value); }}
-                  required
-                />
-              </div>
+                    <button
+                      onClick={() => handleDelete(alert.id)}
+                      className="w-full py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm transition-colors"
+                    >
+                      🗑️ Remove Alert
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
-              <div>
-                <label className="block text-xs font-bold text-[#94a3b8] uppercase mb-1">Target Price (₹)</label>
-                <input
-                  className="w-full bg-[#0f172a] border border-[#334155] rounded-lg px-4 py-2.5 text-[#f1f5f9] focus:outline-none focus:border-[#6366f1]"
-                  type="number"
-                  placeholder="e.g. 999"
-                  value={formTargetPrice}
-                  onChange={function (e) { setFormTargetPrice(e.target.value); }}
-                  required
-                />
-                <p className="text-[10px] text-[#94a3b8] mt-2 font-medium">
-                  We'll email you when the price drops to or below this amount.
-                </p>
-              </div>
-
-              <div className="flex gap-3 pt-4">
+        {/* Modal */}
+        {showModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-[#1e293b] rounded-xl p-6 w-full max-w-md border border-[#334155]">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-bold text-[#f1f5f9]">Create Price Alert</h2>
                 <button
-                  type="button"
-                  onClick={function () { setShowModal(false); }}
-                  className="flex-1 py-3 bg-[#334155] hover:bg-[#475569] text-white rounded-xl transition-all font-bold"
+                  onClick={() => setShowModal(false)}
+                  className="text-[#94a3b8] hover:text-[#f1f5f9] text-2xl"
                 >
-                  Cancel
-                </button>
-                <button type="submit" disabled={submitting} className="flex-1 py-3 bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-xl transition-all font-bold disabled:opacity-50">
-                  {submitting ? "Creating..." : "🔔 Create Alert"}
+                  ×
                 </button>
               </div>
-            </form>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-[#94a3b8] mb-2">
+                    SELECT PRODUCT
+                  </label>
+                  <select
+                    value={selectedProduct}
+                    onChange={(e) => setSelectedProduct(e.target.value)}
+                    className="w-full bg-[#0f172a] border border-[#334155] rounded-lg px-4 py-3 text-[#f1f5f9] focus:outline-none focus:border-[#6366f1]"
+                  >
+                    <option value="">Choose a product...</option>
+                    {products.map(function (product) {
+                      return (
+                        <option key={product.id} value={product.id}>
+                          {product.name.substring(0, 50)}...
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-[#94a3b8] mb-2">
+                    YOUR EMAIL
+                  </label>
+                  <input
+                    type="email"
+                    value={userEmail}
+                    onChange={(e) => setUserEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className="w-full bg-[#0f172a] border border-[#334155] rounded-lg px-4 py-3 text-[#f1f5f9] focus:outline-none focus:border-[#6366f1]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-[#94a3b8] mb-2">
+                    TARGET PRICE (₹)
+                  </label>
+                  <input
+                    type="number"
+                    value={targetPrice}
+                    onChange={(e) => setTargetPrice(e.target.value)}
+                    placeholder="e.g. 15000"
+                    className="w-full bg-[#0f172a] border border-[#334155] rounded-lg px-4 py-3 text-[#f1f5f9] focus:outline-none focus:border-[#6366f1]"
+                  />
+                  <p className="text-[#94a3b8] text-xs mt-1">
+                    We&apos;ll email you when the price drops to or below this amount.
+                  </p>
+                </div>
+
+                <button
+                  onClick={handleCreate}
+                  disabled={creating}
+                  className="w-full py-3 bg-[#6366f1] hover:bg-[#4f46e5] disabled:opacity-50 text-white rounded-lg font-semibold transition-colors"
+                >
+                  {creating ? "Creating..." : "🔔 Create Alert"}
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
-
-    </div>
-  );
-}
-
-export default function AlertsPage() {
-  return (
-    <Suspense fallback={
-      <div className="page-container p-6 lg:p-10">
-        <div className="bg-[#1e293b] border border-[#334155] rounded-xl text-center py-20">
-          <p className="text-[#94a3b8] animate-pulse">Loading Alerts...</p>
-        </div>
+        )}
       </div>
-    }>
-      <AlertsContent />
-    </Suspense>
+    </ProtectedRoute>
   );
 }

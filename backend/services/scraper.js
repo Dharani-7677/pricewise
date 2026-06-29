@@ -1,206 +1,217 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 
-/**
- * Scrapes price details from a given URL using ScraperAPI.
- * Supports Amazon, Flipkart, and Meesho.
- */
-async function scrapePrice(url) {
-    try {
-        if (!process.env.SCRAPERAPI_KEY) {
-            throw new Error("SCRAPERAPI_KEY is missing in .env");
-        }
+const SCRAPER_API_KEY = process.env.SCRAPERAPI_KEY;
 
-        console.log('Fetching URL:', url);
-        
-        // Use ScraperAPI: fetch with render=true for dynamic content
-        let scraperApiUrl = `http://api.scraperapi.com?api_key=${process.env.SCRAPERAPI_KEY}&url=${encodeURIComponent(url)}&render=true`;
-        
-        // Use premium proxies and India IP for Meesho to avoid 500 errors
-        if (url.includes('meesho')) {
-            scraperApiUrl += '&premium=true&country_code=in';
-        }
-        
-        const response = await axios.get(scraperApiUrl, { timeout: 60000 });
-        const html = response.data;
-        
-        console.log('HTML length:', html.length);
-        console.log('HTML snippet:', html.substring(0, 500));
-
-        const $ = cheerio.load(html);
-
-        let name = "";
-        let price = 0;
-        let original_price = 0;
-        let image_url = "";
-        let platform = "other";
-
-        if (url.includes('amazon')) platform = "amazon";
-        else if (url.includes('flipkart')) platform = "flipkart";
-        else if (url.includes('meesho')) platform = "meesho";
-
-        console.log('[Scraper] Platform detected:', platform);
-
-        // 1. Amazon Logic
-        if (platform === "amazon") {
-            name = $('#productTitle').text().trim() || $('#title').text().trim() || "Amazon Product";
-            
-            const amazonSelectors = [
-                { name: '.priceToPay span.a-price-whole', selector: '.priceToPay span.a-price-whole' },
-                { name: '#corePriceDisplay_desktop_feature_div .a-price-whole', selector: '#corePriceDisplay_desktop_feature_div .a-price-whole' },
-                { name: '.reinventPricePriceToPayMargin .a-price-whole', selector: '.reinventPricePriceToPayMargin .a-price-whole' },
-                { name: '#price_inside_buybox', selector: '#price_inside_buybox' },
-                { name: '#newBuyBoxPrice', selector: '#newBuyBoxPrice' },
-                { name: '.a-price.priceToPay .a-price-whole', selector: '.a-price.priceToPay .a-price-whole' }
-            ];
-
-            for (const item of amazonSelectors) {
-                const el = $(item.selector).first();
-                const rawText = el.text().trim();
-                console.log('[Scraper] Trying selector:', item.name, 'Raw:', rawText);
-                
-                if (rawText) {
-                    const parsedPrice = parseFloat(rawText.replace(/[₹, \n\s]/g, ""));
-                    console.log('[Scraper] Parsed price:', parsedPrice);
-                    
-                    if (!isNaN(parsedPrice) && parsedPrice > 0) {
-                        price = parsedPrice;
-                        break;
-                    }
-                }
-            }
-            
-            const strikePrice = $('.a-text-strike').first().text().trim() || 
-                               $('#priceblock_listprice').text().trim() ||
-                               $('.basisPrice .a-offscreen').first().text().trim();
-            original_price = parseFloat(strikePrice.replace(/[₹, \n\s]/g, "")) || price;
-            
-            image_url = $('#landingImage').attr('src') || $('.a-dynamic-image').first().attr('src');
-
-        // 2. Flipkart Logic
-        } else if (platform === "flipkart") {
-            name = $('.B_NuCI').text().trim() || $('h1').first().text().trim() || "Flipkart Product";
-            
-            const flipkartSelectors = [
-                { name: 'div._30jeq3', selector: 'div._30jeq3' },
-                { name: 'div._16Jk6d', selector: 'div._16Jk6d' },
-                { name: 'div.Nx9bqj', selector: 'div.Nx9bqj' },
-                { name: 'div.CEmiEU div._30jeq3', selector: 'div.CEmiEU div._30jeq3' },
-                { name: 'div._25b18 ._30jeq3', selector: 'div._25b18 ._30jeq3' }
-            ];
-
-            for (const item of flipkartSelectors) {
-                const el = $(item.selector).first();
-                const rawText = el.text().trim();
-                console.log('[Scraper] Trying selector:', item.name, 'Raw:', rawText);
-                
-                if (rawText) {
-                    const parsedPrice = parseFloat(rawText.replace(/[₹, \n\s]/g, ""));
-                    console.log('[Scraper] Parsed price:', parsedPrice);
-                    
-                    if (!isNaN(parsedPrice) && parsedPrice > 0) {
-                        price = parsedPrice;
-                        break;
-                    }
-                }
-            }
-
-            // Fallback for Flipkart: look for ₹ symbol
-            if (!price) {
-                console.log('[Scraper] Trying Flipkart fallback (search for ₹ symbol)');
-                $('div').each((i, el) => {
-                    const text = $(el).text().trim();
-                    if (text.startsWith('₹') && text.length < 15) {
-                        const parsed = parseFloat(text.replace(/[₹, \n\s]/g, ""));
-                        if (!isNaN(parsed) && parsed > 0 && !price) {
-                            console.log('[Scraper] Fallback matched:', text, 'Parsed:', parsed);
-                            price = parsed;
-                        }
-                    }
-                });
-            }
-            
-            const strikePrice = $('._3I9_wc').first().text().trim();
-            original_price = parseFloat(strikePrice.replace(/[₹, \n\s]/g, "")) || price;
-            
-            image_url = $('img._396cs4').first().attr('src') || $('img.DByuf4').first().attr('src') || $('img').first().attr('src');
-
-        // 3. Meesho Logic
-        } else if (platform === "meesho") {
-            name = $('.sc-dkzDju').text().trim() || $('h4').first().text().trim() || "Meesho Product";
-            
-            const meeshoSelectors = [
-                { name: 'h4.pdp-price', selector: 'h4.pdp-price' },
-                { name: 'span.pdp-price', selector: 'span.pdp-price' },
-                { name: 'div[class*="price"] h4', selector: 'div[class*="price"] h4' },
-                { name: 'div[class*="Price"] span', selector: 'div[class*="Price"] span' }
-            ];
-
-            for (const item of meeshoSelectors) {
-                const el = $(item.selector).first();
-                const rawText = el.text().trim();
-                console.log('[Scraper] Trying selector:', item.name, 'Raw:', rawText);
-                
-                if (rawText) {
-                    const parsedPrice = parseFloat(rawText.replace(/[₹, \n\s]/g, ""));
-                    console.log('[Scraper] Parsed price:', parsedPrice);
-                    
-                    if (!isNaN(parsedPrice) && parsedPrice > 0) {
-                        price = parsedPrice;
-                        break;
-                    }
-                }
-            }
-
-            // Fallback for Meesho: look for ₹ symbol in product detail section
-            if (!price) {
-                console.log('[Scraper] Trying Meesho fallback (search for ₹ symbol)');
-                $('h4, span, div').each((i, el) => {
-                    const text = $(el).text().trim();
-                    if (text.includes('₹') && text.length < 15) {
-                        const parsed = parseFloat(text.replace(/[₹, \n\s]/g, ""));
-                        if (!isNaN(parsed) && parsed > 0 && !price) {
-                            console.log('[Scraper] Fallback matched:', text, 'Parsed:', parsed);
-                            price = parsed;
-                        }
-                    }
-                });
-            }
-            
-            original_price = price; 
-            
-            image_url = $('img[class*="ProductImage"]').first().attr('src') || $('img[class*="product"]').first().attr('src') || $('img').first().attr('src');
-            
-        } else {
-            // Generic fallback for other sites
-            name = $('h1').first().text().trim() || "Product";
-            const priceString = $('div:contains("₹")').first().text().trim() || "0";
-            console.log('[Scraper] Generic fallback Raw:', priceString);
-            price = parseFloat(priceString.replace(/[₹, \n\s]/g, "")) || 0;
-            console.log('[Scraper] Parsed price:', price);
-            original_price = price;
-            image_url = $('img').first().attr('src') || "";
-        }
-
-        if (!price) {
-            console.log('[Scraper] Price detection FAILED. HTML sample:', $.html().substring(0, 1000));
-            throw new Error(`Could not extract price from ${url}. Page structure might have changed.`);
-        }
-
-        console.log(`[Scraper] Successfully scraped: ${name.substring(0, 30)}...`);
-        console.log(`[Scraper] Price: ₹${price} | Original: ₹${original_price}`);
-
-        return {
-            name,
-            price,
-            original_price,
-            image_url
-        };
-
-    } catch (error) {
-        console.error(`[Scraper] Error scraping ${url}:`, error.message);
-        throw new Error(`Scraping failed: ${error.message}`);
-    }
+function buildScraperUrl(targetUrl, options = {}) {
+  const params = new URLSearchParams({
+    api_key: SCRAPER_API_KEY,
+    url: targetUrl,
+    ...options
+  });
+  return `http://api.scraperapi.com?${params.toString()}`;
 }
 
-module.exports = { scrapePrice };
+async function scrapeAmazon(url) {
+  try {
+    const scraperUrl = buildScraperUrl(url, {
+      country_code: 'in',
+      device_type: 'desktop'
+    });
+
+    const response = await axios.get(scraperUrl, { timeout: 30000 });
+    const $ = cheerio.load(response.data);
+
+    // Current price selectors
+    const priceSelectors = [
+      '#corePriceDisplay_desktop_feature_div .a-price-whole',
+      '.a-price-whole',
+      '#priceblock_ourprice',
+      '#priceblock_dealprice',
+      '#price_inside_buybox',
+      '.priceToPay .a-price-whole'
+    ];
+
+    let priceText = null;
+    for (const selector of priceSelectors) {
+      const el = $(selector).first();
+      if (el.length && el.text().trim()) {
+        priceText = el.text().trim();
+        break;
+      }
+    }
+
+    const price = priceText
+      ? parseFloat(priceText.replace(/[^0-9.]/g, ''))
+      : null;
+
+    // Original/MRP price selectors
+    const mrpSelectors = [
+      '.a-price.a-text-price .a-offscreen',
+      'span.a-price.a-text-price span.a-offscreen',
+      '#listPrice',
+      '.basisPrice .a-offscreen',
+      'span[data-a-strike="true"] .a-offscreen',
+      '#priceblock_saleprice',
+      '.a-text-strike'
+    ];
+
+    let originalPriceText = null;
+    for (const selector of mrpSelectors) {
+      const el = $(selector).first();
+      if (el.length && el.text().trim()) {
+        originalPriceText = el.text().trim();
+        break;
+      }
+    }
+
+    const original_price = originalPriceText
+      ? parseFloat(originalPriceText.replace(/[^0-9.]/g, ''))
+      : price; // fallback to current price if no MRP found
+
+    const name = $('#productTitle').text().trim() ||
+                 $('h1.product-title-word-break').text().trim() ||
+                 null;
+
+    const image = $('#landingImage').attr('src') ||
+                  $('#imgBlkFront').attr('src') ||
+                  $('img#main-image').attr('src') ||
+                  null;
+
+    console.log('Amazon scrape result:', { price, original_price, name: name?.slice(0, 50) });
+    return { platform: 'Amazon', price, original_price, name, image, url };
+  } catch (err) {
+    console.error('Amazon scrape error:', err.message);
+    return { platform: 'Amazon', price: null, original_price: null, name: null, image: null, url };
+  }
+}
+
+async function scrapeFlipkart(url) {
+  try {
+    const scraperUrl = buildScraperUrl(url, {
+      country_code: 'in',
+      render: 'false',
+      keep_headers: 'true'
+    });
+
+    const response = await axios.get(scraperUrl, {
+      timeout: 40000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
+
+    const $ = cheerio.load(response.data);
+
+    const priceSelectors = [
+      'div.Nx9bqj',
+      'div._30jeq3._16Jk6d',
+      'div._30jeq3',
+      'div._25b18c ._30jeq3',
+      '._16Jk6d',
+      'div[class*="_30jeq3"]',
+      'div[class*="Nx9bqj"]'
+    ];
+
+    let priceText = null;
+    for (const selector of priceSelectors) {
+      const el = $(selector).first();
+      if (el.length) {
+        const text = el.text().trim();
+        if (text.includes('₹') || /^\d/.test(text)) {
+          priceText = text;
+          break;
+        }
+      }
+    }
+
+    const price = priceText
+      ? parseFloat(priceText.replace(/[^0-9.]/g, ''))
+      : null;
+
+    // Flipkart original price (strikethrough)
+    const originalPriceSelectors = [
+      'div._3I9_wc',
+      'div._3ouqZc',
+      'div[class*="_3I9_wc"]',
+      'div.yRaY8j'
+    ];
+
+    let originalPriceText = null;
+    for (const selector of originalPriceSelectors) {
+      const el = $(selector).first();
+      if (el.length && el.text().trim()) {
+        originalPriceText = el.text().trim();
+        break;
+      }
+    }
+
+    const original_price = originalPriceText
+      ? parseFloat(originalPriceText.replace(/[^0-9.]/g, ''))
+      : price;
+
+    const nameSelectors = [
+      'span.B_NuCI',
+      'h1._9E25nV span',
+      'h1.yhB1nd span',
+      'div._35KyD6',
+      'h1[class*="yhB1nd"]'
+    ];
+
+    let name = null;
+    for (const selector of nameSelectors) {
+      const el = $(selector).first();
+      if (el.length && el.text().trim()) {
+        name = el.text().trim();
+        break;
+      }
+    }
+
+    const image = $('img._396cs4').attr('src') ||
+                  $('img._2r_T1I').attr('src') ||
+                  $('img.q6DClP').attr('src') ||
+                  null;
+
+    console.log('Flipkart scrape result:', { price, original_price, name: name?.slice(0, 50), priceText });
+    return { platform: 'Flipkart', price, original_price, name, image, url };
+  } catch (err) {
+    console.error('Flipkart scrape error:', err.message);
+    return { platform: 'Flipkart', price: null, original_price: null, name: null, image: null, url };
+  }
+}
+
+async function scrapeMeesho(url) {
+  try {
+    const scraperUrl = buildScraperUrl(url, {
+      country_code: 'in',
+      render: 'false'
+    });
+
+    const response = await axios.get(scraperUrl, { timeout: 30000 });
+    const $ = cheerio.load(response.data);
+
+    const priceText = $('h4[class*="Text"]').first().text().trim() ||
+                      $('span[class*="price"]').first().text().trim();
+
+    const price = priceText
+      ? parseFloat(priceText.replace(/[^0-9.]/g, ''))
+      : null;
+
+    const name = $('p[class*="ProductName"]').first().text().trim() ||
+                 $('h1').first().text().trim() || null;
+
+    return { platform: 'Meesho', price, original_price: price, name, image: null, url };
+  } catch (err) {
+    console.error('Meesho scrape error:', err.message);
+    return { platform: 'Meesho', price: null, original_price: null, name: null, image: null, url };
+  }
+}
+
+async function scrapeUrl(url) {
+  if (url.includes('amazon')) return await scrapeAmazon(url);
+  if (url.includes('flipkart')) return await scrapeFlipkart(url);
+  if (url.includes('meesho')) return await scrapeMeesho(url);
+  return { platform: 'Unknown', price: null, original_price: null, name: null, image: null, url };
+}
+
+module.exports = { scrapeUrl, scrapeAmazon, scrapeFlipkart, scrapeMeesho };

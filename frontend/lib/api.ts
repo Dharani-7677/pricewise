@@ -1,4 +1,5 @@
 import axios from "axios";
+import { supabase } from './supabase';
 
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api",
@@ -7,11 +8,14 @@ const api = axios.create({
   },
 });
 
-// ── Types ──
+async function getUserId(): Promise<string> {
+  const { data: { user } } = await supabase.auth.getUser();
+  return user?.id || 'guest';
+}
 
 export interface Product {
   id: string;
-  user_id?: string;
+  user_id: string;
   name: string;
   url: string;
   platform: string;
@@ -29,15 +33,6 @@ export interface PriceHistoryEntry {
   checked_at: string;
 }
 
-export interface DealAnalysis {
-  score: number;
-  verdict: string;
-  recommendation: string;
-  reasons: string[];
-  badges: { label: string; type: string }[];
-  discount_percent: number;
-}
-
 export interface Alert {
   id: string;
   product_id: string;
@@ -45,10 +40,21 @@ export interface Alert {
   target_price: number;
   is_triggered: boolean;
   created_at: string;
-  products?: {
+  products: {
     name: string;
+    platform: string;
     current_price: number;
+    url: string;
   };
+}
+
+export interface DealAnalysis {
+  score: number;
+  verdict: string;
+  recommendation: string;
+  reasons: string[];
+  badges: string[];
+  discount_percent: number;
 }
 
 export interface CommunityDeal {
@@ -66,116 +72,106 @@ export interface CommunityDeal {
   };
 }
 
-export interface CommunityDealLegacy extends Product {
-  analysis: DealAnalysis;
+export interface SmartCompareItem {
+  platform: string;
+  price: number | null;
+  name: string;
+  image_url: string | null;
+  url: string | null;
+  isSource: boolean;
+  original_price: number | null;
 }
 
-// ── Products API ──
+export interface SmartCompareResult {
+  results: SmartCompareItem[];
+}
 
 export async function getProducts(): Promise<Product[]> {
-  const res = await api.get("/products");
-  return res.data;
-}
-
-export async function getCommunityDeals(): Promise<CommunityDeal[]> {
-  const res = await api.get("/community");
-  return res.data;
+  const userId = await getUserId();
+  const response = await api.get('/products', {
+    headers: { 'x-user-id': userId }
+  });
+  return response.data;
 }
 
 export async function getProduct(id: string): Promise<Product> {
-  const res = await api.get(`/products/${id}`);
-  return res.data;
+  const response = await api.get(`/products/${id}`);
+  return response.data;
 }
 
-export async function addProduct(payload: {
-  url: string;
-  name?: string;
-  platform?: string;
-  current_price?: number;
-  original_price?: number;
-  image_url?: string;
-}): Promise<Product> {
-  const res = await api.post("/products", payload);
-  return res.data;
+export async function addProduct(product: Omit<Product, 'id' | 'created_at'>): Promise<Product> {
+  const userId = await getUserId();
+  const response = await api.post('/products', product, {
+    headers: { 'x-user-id': userId }
+  });
+  return response.data;
 }
 
 export async function deleteProduct(id: string): Promise<void> {
-  await api.delete(`/products/${id}`);
+  const userId = await getUserId();
+  await api.delete(`/products/${id}`, {
+    headers: { 'x-user-id': userId }
+  });
 }
-
-export async function updateProductPrice(productId: string, newPrice: number) {
-  const res = await api.put(`/products/${productId}/price`, { new_price: newPrice });
-  return res.data;
-}
-
-export async function getDealAnalysis(productId: string): Promise<DealAnalysis> {
-  const res = await api.get(`/products/${productId}/analysis`);
-  return res.data;
-}
-
-// ── Price History API ──
 
 export async function getPriceHistory(productId: string): Promise<PriceHistoryEntry[]> {
-  const res = await api.get(`/prices/${productId}`);
-  return res.data;
+  const response = await api.get(`/prices/${productId}`);
+  return response.data;
 }
-
-export async function addPriceEntry(
-  productId: string,
-  price: number,
-  discountPercent: number
-): Promise<PriceHistoryEntry> {
-  const res = await api.post("/prices", {
-    product_id: productId,
-    price,
-    discount_percent: discountPercent,
-  });
-  return res.data;
-}
-
-// ── Alerts API ──
 
 export async function getAlerts(): Promise<Alert[]> {
-  const res = await api.get("/alerts");
-  return res.data;
+  const response = await api.get('/alerts');
+  return response.data;
 }
 
-export async function createAlert(
-  productId: string,
-  userEmail: string,
-  targetPrice: number
-): Promise<Alert> {
-  const res = await api.post("/alerts", {
-    product_id: productId,
-    user_email: userEmail,
-    target_price: targetPrice,
+export async function createAlert(alert: { product_id: string; user_email: string; target_price: number }): Promise<Alert> {
+  const response = await api.post('/alerts', {
+    product_id: alert.product_id.trim().replace(/"/g, ''),
+    user_email: alert.user_email.trim(),
+    target_price: Number(alert.target_price)
   });
-  return res.data;
+  return response.data;
 }
 
 export async function deleteAlert(id: string): Promise<void> {
   await api.delete(`/alerts/${id}`);
 }
 
-// ── Community Deals API ──
+export async function getDealAnalysis(productId: string): Promise<DealAnalysis> {
+  const response = await api.get(`/products/${productId}/analysis`);
+  return response.data;
+}
 
-export async function getCommunityDealsNew(): Promise<CommunityDeal[]> {
-  const response = await api.get('/community-deals');
+export async function updateProductPrice(id: string, price: number): Promise<Product> {
+  const userId = await getUserId();
+  const response = await api.put(`/products/${id}/price`, { price }, {
+    headers: { 'x-user-id': userId }
+  });
+  return response.data;
+}
+
+export async function getCommunityDeals(): Promise<CommunityDeal[]> {
+  const response = await api.get('/community');
   return response.data;
 }
 
 export async function createCommunityDeal(deal: { product_id: string; posted_by: string; deal_description: string }): Promise<CommunityDeal> {
-  const response = await api.post('/community-deals', deal);
+  const response = await api.post('/community', deal);
   return response.data;
 }
 
 export async function upvoteCommunityDeal(id: string): Promise<CommunityDeal> {
-  const response = await api.put(`/community-deals/${id}/upvote`);
+  const response = await api.put(`/community/${id}/upvote`);
   return response.data;
 }
 
 export async function deleteCommunityDeal(id: string): Promise<void> {
-  await api.delete(`/community-deals/${id}`);
+  await api.delete(`/community/${id}`);
 }
+
+export const smartCompare = async (url: string): Promise<SmartCompareResult> => {
+  const response = await api.post('/smart-compare', { url });
+  return response.data;
+};
 
 export default api;
